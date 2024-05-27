@@ -1,0 +1,13 @@
+#!/bin/bash
+set -meuo pipefail
+IFS=
+
+ourname="$(basename "$0")"
+lockpath="$HOME/.$ourname.lock"
+
+res=$(./locksafely "$lockpath")
+if [[ "$res" == ok ]]; then
+    echo "got lock"
+    sleep 7
+fi
+

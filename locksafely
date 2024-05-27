@@ -1,0 +1,132 @@
+#!/bin/bash
+set -meuo pipefail
+IFS=
+
+usage() {
+    echo "usage:"
+    echo "    res=\$($0 \$lockpath)"
+    echo "    if [[ \"\$res\" == ok ]]; then ..."
+    echo
+    echo "  Create the lockfile if needed, get a lock but non-blocking;"
+    echo "  prints 'ok' if it got the lock, otherwise 'already_locked'."
+    echo 
+    echo "  No explicit unlocking is needed, the lock is dropped when the"
+    echo "  process that got the lock disappears, or the lock daemon which "
+    echo "  is started by this command is killed / machine resets."
+    echo
+    echo "  Note that the lock is not dropped immediately after the locker"
+    echo "  has exited--the lock daemon does it asynchronically."
+    echo
+    echo "  The (only) preconditions for safe locking:"
+    echo 
+    echo "    - all processes obtaining the lock are local (and perhaps"
+    echo "      \$lockpath must be on a local filesystem)"
+    echo "    - the lock is only held for a time short enough so that no pid"
+    echo "      wrap-around occurs (there must be at least 1 second between the"
+    echo "      parent process leaving and the pid being re-used)"
+    echo "    - flock(2) is not buggy"
+    echo
+    echo "  Options:"
+    echo
+    echo "    --exclusive    exclusive lock (default)"
+    echo "    --shared       shared lock (succeeds if there only other shared"
+    echo "                   lockers)"
+    echo "    --semaphore    maintain any number of lockers, give 'already_locked'"
+    echo "                   there are any other lockers already. Do not mix with"
+    echo "                   --exclusive or --shared on the same lock file!"
+    exit 1
+}
+
+lockmode=--exclusive
+opt_semaphore=
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --exclusive)
+            lockmode="$1"
+            ;;
+        --shared)
+            lockmode="$1"
+            ;;
+        --semaphore)
+            opt_semaphore=1
+            lockmode=--UNUSED
+            ;;
+        -*)
+            usage
+            ;;
+        *)
+            break
+            ;;
+    esac
+    shift
+done
+
+if [[ $# -ne 1 ]]; then
+    usage
+fi
+
+lockpath="$1"
+
+
+ppid=$PPID
+
+if [ ! -e "$lockpath" ]; then
+    touch "$lockpath"
+fi
+
+_flock() {
+    if flock -E 7 "$@"; then
+        echo ok
+    else
+        e=$?
+        if [[ "$e" == 7 ]]; then
+            echo already_locked
+        else
+            echo "$0: could not execute flock" >&2
+            exit 1
+        fi
+    fi
+}
+kill_quietly() {
+    kill "$@" 2>/dev/null
+}
+
+{
+    if [[ "$opt_semaphore" == 1 ]]; then
+        # Test quickly whether there are any lockers
+        ret=$(_flock --exclusive --nonblock 0)
+        _flock --unlock --nonblock 0 > /dev/null
+        # then keep a shared lock
+        while true; do
+            r2=$(_flock --shared --nonblock 0)
+            if [[ "$r2" == "ok" ]]; then
+                (
+                    exec 1>&-
+                    exec 2>&-
+                    while kill_quietly -0 "$ppid"; do
+                        sleep 1
+                    done
+                )&
+                break
+            fi
+            # retry, this will happen (only rarely) if we collided
+            # with another semaphore getter in the --exclusive lock
+            # step above (or when mis-using $0 --exclusive on the same
+            # lock file)
+            sleep 0.3
+        done
+    else
+        ret=$(_flock "$lockmode" --nonblock 0)
+        if [[ "$ret" == ok ]]; then
+            (
+                exec 1>&-
+                exec 2>&-
+                while kill_quietly -0 "$ppid"; do
+                    sleep 1
+                done
+            )&
+        fi
+    fi
+    echo "$ret"
+} < "$lockpath"
