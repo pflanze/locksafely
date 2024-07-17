@@ -71,6 +71,11 @@ lockpath="$1"
 
 ppid=$PPID
 
+if [ "$ppid" -eq 1 ]; then
+    echo "$0 $lockpath: error: parent process disappeared before waiting for our OK--are you forking nested twice for running us?" >&2
+    exit 1
+fi
+
 if [ ! -e "$lockpath" ]; then
     touch "$lockpath"
 fi
