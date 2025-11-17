@@ -37,6 +37,31 @@ the process is still there. There's no filehandle that the calling
 process needs to keep open or prevent from being inherited
 accidentally.
 
+### Force release
+
+If you need to re-run a job and the lock gets in the way, do the
+following:
+
+* To check if the lock is actually being held:
+
+        lsof path/to/the/lockfile
+
+    If no process shows up then it's not being held. Note that the
+    processes shown by lsof are not the processes carrying out the
+    work, but the daemon waiting for the actual processes to finish,
+    so that it can release the lock.
+
+* To check up on the process causing the lock to be held:
+
+        ps auxwwf | less
+        
+    then `/<pid>` where `<pid>` is what lsof showed for locksafely
+    processes. You'll find those processes, their second argument is
+    the pid of the process that they are looking
+    for. `/<looked-for-pid>` will show you that process (group). You
+    can `kill` those (you might have to kill child processes
+    explicitly, too).
+
 # Copyright
 
 Copyright by Christian Jaeger <ch@christianjaeger.ch>.

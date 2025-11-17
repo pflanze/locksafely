@@ -4,15 +4,16 @@ IFS=
 
 usage() {
     echo "usage:"
-    echo "    res=\$($0 \$lockpath)"
+    echo "    res=\$($0 \$lockpath [\$BASHPID])"
     echo "    if [[ \"\$res\" == ok ]]; then ..."
     echo
     echo "  Create the lockfile if needed, get a lock but non-blocking;"
     echo "  prints 'ok' if it got the lock, otherwise 'already_locked'."
     echo 
     echo "  No explicit unlocking is needed, the lock is dropped when the"
-    echo "  process that got the lock disappears, or the lock daemon which "
-    echo "  is started by this command is killed / machine resets."
+    echo "  process with the pid that was passed to locksafely (or by default, "
+    echo "  the pid of the parent process) disappears, or the lock daemon which is"
+    echo "  started by this command is killed / machine resets."
     echo
     echo "  Note that the lock is not dropped immediately after the locker"
     echo "  has exited--the lock daemon does it asynchronically."
@@ -40,6 +41,8 @@ usage() {
 lockmode=--exclusive
 opt_semaphore=
 
+orig_args=("$@")
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --exclusive)
@@ -62,14 +65,20 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-if [[ $# -ne 1 ]]; then
-    usage
-fi
+case $# in
+    1)
+        exec "$0" "${orig_args[@]}" "$PPID"
+        ;;
+    2)
+        true
+        ;;
+    *)
+        usage
+        ;;
+esac
 
 lockpath="$1"
-
-
-ppid=$PPID
+ppid="$2"
 
 if [ "$ppid" -eq 1 ]; then
     echo "$0 $lockpath: error: parent process disappeared before waiting for our OK--are you forking nested twice for running us?" >&2
@@ -77,7 +86,11 @@ if [ "$ppid" -eq 1 ]; then
 fi
 
 if [ ! -e "$lockpath" ]; then
-    touch "$lockpath"
+    {
+        echo 'use `lsof <this-file>` to see locksafely processes that hold locks on it;'
+        echo 'find them in `ps auxwwf`, their second argument is the pid that they are '
+        echo 'waiting for to exit.'
+    } > "$lockpath"
 fi
 
 _flock() {
